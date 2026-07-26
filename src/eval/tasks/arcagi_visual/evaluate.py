@@ -32,10 +32,37 @@ def parse_grid(text: str) -> list[list[int]]:
     # arcagiVisualKit extracts the last bracketed grid from free-form output;
     # it accepts Python-style lists (single quotes, trailing commas), not only
     # strict JSON.
-    compact = text.replace("```json", "").replace("```", "")
-    matches = re.findall(r"\[\[[\s\S]*?\]\]", compact)
+    compact = text.replace("```json", "").replace("```python", "").replace("```", "")
+    # Find balanced list expressions rather than relying on a regex. This
+    # handles nested rows, whitespace, Python literals, and multiple candidate
+    # grids in a reasoning trace.
+    candidates: list[str] = []
+    starts = [m.start() for m in re.finditer(r"\[\[", compact)]
+    for start in starts:
+        depth = 0
+        in_string: str | None = None
+        escaped = False
+        for index in range(start, len(compact)):
+            char = compact[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == in_string:
+                    in_string = None
+                continue
+            if char in "'\"":
+                in_string = char
+            elif char == "[":
+                depth += 1
+            elif char == "]":
+                depth -= 1
+                if depth == 0:
+                    candidates.append(compact[start : index + 1])
+                    break
     value = None
-    for candidate in reversed(matches):
+    for candidate in reversed(candidates):
         try:
             value = ast.literal_eval(candidate)
             break
@@ -130,6 +157,12 @@ def main() -> None:
         "accuracy": correct / total if total else 0.0,
         "perfect_puzzle_rate": perfect / total if total else 0.0,
         "puzzle_average_accuracy": cell_correct / cell_total if cell_total else 0.0,
+        "attempts_total": total,
+        "attempts_perfect": perfect,
+        "attempts_average_correctness": perfect / total if total else 0.0,
+        "puzzles_total": total,
+        "puzzles_with_any_perfect_attempt": perfect,
+        "puzzle_success_rate": perfect / total if total else 0.0,
         "cell_accuracy": cell_correct / cell_total if cell_total else 0.0,
         "invalid": invalid,
         "inference_errors": errors,
