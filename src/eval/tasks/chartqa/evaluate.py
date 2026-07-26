@@ -16,8 +16,10 @@ from vlm_common import (
     VllmMultimodalRunner,
     add_common_args,
     evaluate_records,
+    load_hf_split,
     load_records,
     normalize_text,
+    write_pil_image,
     write_metrics,
 )
 
@@ -53,6 +55,21 @@ def load_chartqa(path: str, image_root: str) -> tuple[list[dict], tempfile.Tempo
     return records, tmp
 
 
+def load_cached_chartqa() -> tuple[list[dict], tempfile.TemporaryDirectory]:
+    tmp = tempfile.TemporaryDirectory(prefix="chartqa-")
+    image_dir = Path(tmp.name)
+    records = []
+    for index, row in enumerate(load_hf_split("HuggingFaceM4/ChartQA", "test")):
+        records.append({
+            "id": index,
+            "image": write_pil_image(row["image"], image_dir, f"{index}.png"),
+            "question": row["query"],
+            "answer": row["label"],
+            "subset": row.get("human_or_machine"),
+        })
+    return records, tmp
+
+
 def prompt(record: dict) -> str:
     return (
         "Answer the chart question. Return only the concise answer, with no explanation.\n"
@@ -84,7 +101,10 @@ def score(record: dict, response: str) -> bool:
 
 def main() -> None:
     args = parse_args()
-    records, temporary = load_chartqa(args.data, args.image_root)
+    if args.data:
+        records, temporary = load_chartqa(args.data, args.image_root)
+    else:
+        records, temporary = load_cached_chartqa()
     if args.limit != -1:
         records = records[:args.limit]
     runner = VllmMultimodalRunner(

@@ -23,7 +23,10 @@ from PIL import Image
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model-path", default="final_model")
-    parser.add_argument("--data", required=True, help="Dataset JSON/JSONL file")
+    parser.add_argument(
+        "--data",
+        help="Optional local dataset override. By default the task loads its cached Hugging Face dataset.",
+    )
     parser.add_argument("--image-root", default="", help="Root for relative image paths")
     parser.add_argument("--limit", type=int, default=-1)
     parser.add_argument("--max-tokens", type=int, default=512)
@@ -161,6 +164,21 @@ def write_image_bytes(data: bytes, directory: Path, name: str) -> str:
     with Image.open(io.BytesIO(data)) as image:
         image.convert("RGB").save(target)
     return str(target)
+
+
+def write_pil_image(image: Image.Image, directory: Path, name: str) -> str:
+    """Materialize a datasets.Image value and return its local path."""
+    directory.mkdir(parents=True, exist_ok=True)
+    target = directory / f"{Path(name).stem}.png"
+    image.convert("RGB").save(target)
+    return str(target)
+
+
+def load_hf_split(dataset: str, split: str):
+    """Load a split from PostTrainBench's pre-populated Hugging Face cache."""
+    from datasets import load_dataset
+
+    return load_dataset(dataset, split=split)
 
 
 def write_metrics(path: str | None, metrics: dict[str, Any]) -> None:

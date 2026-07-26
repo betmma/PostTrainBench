@@ -19,3 +19,4 @@ trl==0.27.2
 ninja==1.13.0
 packaging==26.0
 huggingface-hub==0.36.0
+Pillow==11.3.0

@@ -5,27 +5,71 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import re
 from pathlib import Path
 import sys
+import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+EVALUATION_CODE = Path(__file__).resolve().parent / "evaluation_code"
+if str(EVALUATION_CODE) not in sys.path:
+    sys.path.insert(0, str(EVALUATION_CODE))
 
 from vlm_common import (
     VllmMultimodalRunner,
     add_common_args,
     extract_json,
+    load_hf_split,
     load_records,
     resolve_image,
     write_metrics,
 )
+from puzzle.generator import ArcPuzzleGenerator
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     add_common_args(parser)
-    parser.add_argument("--task-root", required=True)
+    parser.add_argument("--task-root")
     return parser.parse_args()
+
+
+def load_cached_arcagi() -> tuple[list[dict], tempfile.TemporaryDirectory]:
+    """Render the official 400 ARC-AGI-1 evaluation tasks from the HF cache."""
+    temporary = tempfile.TemporaryDirectory(prefix="arcagi-visual-")
+    root = Path(temporary.name)
+    task_dir = root / "tasks"
+    rendered_dir = root / "rendered"
+    task_dir.mkdir(parents=True)
+
+    rows = load_hf_split("dataartist/arc-agi", "evaluation")
+    task_paths: list[tuple[Path, str]] = []
+    for index, row in enumerate(rows):
+        task_id = str(row.get("id") or f"task-{index:04d}")
+        task_path = task_dir / f"{task_id}.json"
+        task_path.write_text(
+            json.dumps({"train": row["train"], "test": row["test"]}),
+            encoding="utf-8",
+        )
+        task_paths.append((task_path, task_id))
+
+    generator = ArcPuzzleGenerator(
+        dataset_dir=task_dir,
+        output_dir=rendered_dir,
+        cell_size=32,
+        prompt=(
+            "Each row contains input and output grids. Learn the pattern and "
+            "generate the output grid for the last input while keeping existing "
+            "patterns without modification."
+        ),
+        seed=0,
+    )
+    records = [
+        generator.create_puzzle(task_path=task_path, puzzle_id=task_id).to_dict()
+        for task_path, task_id in task_paths
+    ]
+    return records, temporary
 
 
 def parse_grid(text: str) -> list[list[int]]:
@@ -93,10 +137,17 @@ ARC_PROMPT_SUFFIX = (
 
 def main() -> None:
     args = parse_args()
-    records = load_records(args.data)
+    temporary = None
+    if args.data:
+        if not args.task_root:
+            raise SystemExit("--task-root is required with --data")
+        records = load_records(args.data)
+        root = Path(args.task_root)
+    else:
+        records, temporary = load_cached_arcagi()
+        root = Path(temporary.name) / "rendered"
     if args.limit != -1:
         records = records[:args.limit]
-    root = Path(args.task_root)
     runner = VllmMultimodalRunner(
         args.model_path,
         max_tokens=args.max_tokens,
@@ -169,6 +220,8 @@ def main() -> None:
         "details": details,
     }
     write_metrics(args.json_output_file, metrics)
+    if temporary:
+        temporary.cleanup()
 
 
 if __name__ == "__main__":

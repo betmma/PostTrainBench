@@ -14,8 +14,10 @@ from vlm_common import (
     VllmMultimodalRunner,
     add_common_args,
     evaluate_records,
+    load_hf_split,
     load_records,
     normalize_text,
+    write_pil_image,
     write_metrics,
 )
 
@@ -59,6 +61,27 @@ def load_babyvision(path: str) -> tuple[list[dict], tempfile.TemporaryDirectory 
     return records, tmp
 
 
+def load_cached_babyvision() -> tuple[list[dict], tempfile.TemporaryDirectory]:
+    tmp = tempfile.TemporaryDirectory(prefix="babyvision-")
+    image_dir = Path(tmp.name)
+    records = []
+    for index, row in enumerate(load_hf_split("UnipatAI/BabyVision", "train")):
+        if row.get("ansType") == "blank":
+            question, answer = row["question"], row["blankAns"]
+        else:
+            options = row.get("options") or []
+            choices = "\n".join(f"{chr(65+i)}. {value}" for i, value in enumerate(options))
+            question = f"{row['question']}\nChoices:\n{choices}"
+            answer = chr(65 + int(row["choiceAns"]))
+        records.append({
+            **row,
+            "image": write_pil_image(row["image"], image_dir, f"{index}.png"),
+            "question": question,
+            "answer": answer,
+        })
+    return records, tmp
+
+
 def prompt(record: dict) -> str:
     return (
         "Answer the visual question. Return only the short answer, with no explanation.\n"
@@ -76,7 +99,10 @@ def score(record: dict, response: str) -> bool:
 
 def main() -> None:
     args = parse_args()
-    records, temporary = load_babyvision(args.data)
+    if args.data:
+        records, temporary = load_babyvision(args.data)
+    else:
+        records, temporary = load_cached_babyvision()
     if args.limit != -1:
         records = records[:args.limit]
     runner = VllmMultimodalRunner(

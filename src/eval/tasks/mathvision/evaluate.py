@@ -13,8 +13,10 @@ from vlm_common import (
     VllmMultimodalRunner,
     add_common_args,
     evaluate_records,
+    load_hf_split,
     load_records,
     normalize_text,
+    write_pil_image,
     write_metrics,
     write_image_bytes,
 )
@@ -46,6 +48,18 @@ def load_mathvision(path: str) -> tuple[list[dict], tempfile.TemporaryDirectory 
     return records, tmp
 
 
+def load_cached_mathvision() -> tuple[list[dict], tempfile.TemporaryDirectory]:
+    tmp = tempfile.TemporaryDirectory(prefix="mathvision-")
+    image_dir = Path(tmp.name)
+    records = []
+    for index, row in enumerate(load_hf_split("MathLLMs/MathVision", "testmini")):
+        record = dict(row)
+        image = row.get("decoded_image") or row.get("image")
+        record["image"] = write_pil_image(image, image_dir, f"{index}.png")
+        records.append(record)
+    return records, tmp
+
+
 def prompt(record: dict) -> str:
     options = record.get("options") or record.get("choices") or []
     choices = "\n".join(f"{chr(65+i)}. {value}" for i, value in enumerate(options))
@@ -65,7 +79,10 @@ def score(record: dict, response: str) -> bool:
 
 def main() -> None:
     args = parse_args()
-    records, temporary = load_mathvision(args.data)
+    if args.data:
+        records, temporary = load_mathvision(args.data)
+    else:
+        records, temporary = load_cached_mathvision()
     if args.limit != -1:
         records = records[:args.limit]
     runner = VllmMultimodalRunner(args.model_path, max_tokens=args.max_tokens, temperature=args.temperature,

@@ -45,6 +45,9 @@ mkdir -p "${JOB_DIR}"
 mkdir "${JOB_DIR}/task"
 
 cp "src/eval/tasks/${EVALUATION_TASK}/evaluate.py" "${JOB_DIR}/task"
+if [ -f "src/eval/vlm_common.py" ]; then
+    cp "src/eval/vlm_common.py" "${JOB_DIR}/task"
+fi
 if [ -d "src/eval/tasks/${EVALUATION_TASK}/evaluation_code" ]; then
     cp -r "src/eval/tasks/${EVALUATION_TASK}/evaluation_code" "${JOB_DIR}/task"
 fi
