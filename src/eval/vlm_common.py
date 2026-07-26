@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import argparse
 import base64
+import io
 import json
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
+
+from PIL import Image
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -123,6 +127,8 @@ class VllmMultimodalRunner:
             model=model_path,
             gpu_memory_utilization=gpu_memory_utilization,
             limit_mm_per_prompt={"image": 1},
+            max_model_len=8192,
+            trust_remote_code=True,
         )
         self.max_connections = max_connections
 
@@ -144,6 +150,17 @@ class VllmMultimodalRunner:
             return Prediction(response=text)
         except Exception as exc:  # preserve per-sample failures in metrics
             return Prediction(response="", error=f"{type(exc).__name__}: {exc}")
+
+
+def write_image_bytes(data: bytes, directory: Path, name: str) -> str:
+    """Materialize an embedded benchmark image and return its path."""
+    directory.mkdir(parents=True, exist_ok=True)
+    suffix = Path(name).suffix or ".png"
+    target = directory / f"{Path(name).stem}{suffix}"
+    # Decode and resave so corrupt/unsupported image payloads fail at ingestion.
+    with Image.open(io.BytesIO(data)) as image:
+        image.convert("RGB").save(target)
+    return str(target)
 
 
 def write_metrics(path: str | None, metrics: dict[str, Any]) -> None:

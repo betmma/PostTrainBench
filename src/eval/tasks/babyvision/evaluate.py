@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import sys
+import tempfile
+import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -23,6 +26,39 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def load_babyvision(path: str) -> tuple[list[dict], tempfile.TemporaryDirectory | None]:
+    source = Path(path)
+    if source.suffix.lower() != ".zip":
+        return load_records(source), None
+    tmp = tempfile.TemporaryDirectory(prefix="babyvision-")
+    root = Path(tmp.name)
+    records = []
+    with zipfile.ZipFile(source) as archive:
+        metadata = archive.read("babyvision_data/meta_data.jsonl").decode()
+        for line in metadata.splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            member = f"babyvision_data/{row['image']}"
+            target = root / row["image"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(archive.read(member))
+            if row.get("ansType") == "blank":
+                question, answer = row["question"], row["blankAns"]
+            else:
+                options = row.get("options") or []
+                choices = "\n".join(f"{chr(65+i)}. {value}" for i, value in enumerate(options))
+                question = f"{row['question']}\nChoices:\n{choices}"
+                answer = chr(65 + int(row["choiceAns"]))
+            records.append({
+                **row,
+                "image": str(target),
+                "question": question,
+                "answer": answer,
+            })
+    return records, tmp
+
+
 def prompt(record: dict) -> str:
     return (
         "Answer the visual question. Return only the short answer, with no explanation.\n"
@@ -40,7 +76,7 @@ def score(record: dict, response: str) -> bool:
 
 def main() -> None:
     args = parse_args()
-    records = load_records(args.data)
+    records, temporary = load_babyvision(args.data)
     if args.limit != -1:
         records = records[:args.limit]
     runner = VllmMultimodalRunner(
@@ -55,6 +91,8 @@ def main() -> None:
     )
     metrics["benchmark"] = "babyvision"
     write_metrics(args.json_output_file, metrics)
+    if temporary:
+        temporary.cleanup()
 
 
 if __name__ == "__main__":
